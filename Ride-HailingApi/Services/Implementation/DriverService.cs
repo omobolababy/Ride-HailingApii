@@ -5,6 +5,7 @@ using Ride_HailingApi.Entities;
 using Ride_HailingApi.Enums;
 using Ride_HailingApi.Repositories.Interface;
 using Ride_HailingApi.Services.Implementation;
+using Ride_HailingApi.Helpers;
 using Ride_HailingApi.Services.Interface;
 using RideHailingApi.DTOs.Common;
 
@@ -35,26 +36,26 @@ public class DriverService : IDriverService
         if (user is null || user.Role != UserRole.Driver)
         {
             _logger.LogWarning("Onboarding rejected: user {UserId} is not a driver account.", userId);
-            return ApiResponse<DriverResponse>.FailResponse("Only driver accounts can submit onboarding information.");
+            return ApiResponse<DriverResponse>.FailResponse("Only driver accounts can submit onboarding information.", ResponseCodes.Forbidden);
         }
 
         var existing = await _driverRepository.GetByUserIdAsync(userId);
         if (existing is not null)
         {
             _logger.LogWarning("Onboarding rejected: driver {UserId} has already submitted information.", userId);
-            return ApiResponse<DriverResponse>.FailResponse("Driver information has already been submitted.");
+            return ApiResponse<DriverResponse>.FailResponse("Driver information has already been submitted.", ResponseCodes.Conflict);
         }
 
         if (await _driverRepository.LicenseNumberExistsAsync(request.LicenseNumber))
         {
             _logger.LogWarning("Onboarding rejected for user {UserId}: license number already registered.", userId);
-            return ApiResponse<DriverResponse>.FailResponse("This license number is already registered.");
+            return ApiResponse<DriverResponse>.FailResponse("This license number is already registered.", ResponseCodes.Conflict);
         }
 
         if (await _driverRepository.PlateNumberExistsAsync(request.PlateNumber))
         {
             _logger.LogWarning("Onboarding rejected for user {UserId}: plate number already registered.", userId);
-            return ApiResponse<DriverResponse>.FailResponse("This plate number is already registered.");
+            return ApiResponse<DriverResponse>.FailResponse("This plate number is already registered.", ResponseCodes.Conflict);
         }
 
         var driverProfile = new DriverProfile
@@ -82,7 +83,7 @@ public class DriverService : IDriverService
         {
             // Unique indexes on license/plate catch the race where two requests pass the exists-checks together.
             _logger.LogWarning(ex, "Onboarding failed on save for user {UserId}, most likely a duplicate license or plate number.", userId);
-            return ApiResponse<DriverResponse>.FailResponse("This license number or plate number is already registered.");
+            return ApiResponse<DriverResponse>.FailResponse("This license number or plate number is already registered.", ResponseCodes.Conflict);
         }
 
         _logger.LogInformation("Driver {UserId} submitted onboarding information as profile {DriverProfileId}.", userId, driverProfile.Id);
@@ -92,7 +93,7 @@ public class DriverService : IDriverService
 
         var full = await _driverRepository.GetByIdWithDetailsAsync(driverProfile.Id);
         return ApiResponse<DriverResponse>.SuccessResponse(MapToResponse(full!),
-            "Driver information submitted successfully. Awaiting admin approval.");
+            "Driver information submitted successfully. Awaiting admin approval.", ResponseCodes.Created);
     }
 
     public async Task<ApiResponse<DriverResponse>> SetAvailabilityAsync(int userId, bool isAvailable)
@@ -100,13 +101,13 @@ public class DriverService : IDriverService
         var driverProfile = await _driverRepository.GetByUserIdAsync(userId);
         if (driverProfile is null)
         {
-            return ApiResponse<DriverResponse>.FailResponse("Driver profile not found. Please complete onboarding first.");
+            return ApiResponse<DriverResponse>.FailResponse("Driver profile not found. Please complete onboarding first.", ResponseCodes.NotFound);
         }
 
         if (driverProfile.ApprovalStatus != DriverApprovalStatus.Approved)
         {
             _logger.LogWarning("Availability change rejected: driver {UserId} is not approved (status {Status}).", userId, driverProfile.ApprovalStatus);
-            return ApiResponse<DriverResponse>.FailResponse("Your driver account has not been approved yet.");
+            return ApiResponse<DriverResponse>.FailResponse("Your driver account has not been approved yet.", ResponseCodes.Forbidden);
         }
 
         driverProfile.IsAvailable = isAvailable;
@@ -127,14 +128,14 @@ public class DriverService : IDriverService
         var driverProfile = await _driverRepository.GetByUserIdAsync(userId);
         if (driverProfile is null)
         {
-            return ApiResponse<IEnumerable<RideResponse>>.FailResponse("Driver profile not found.");
+            return ApiResponse<IEnumerable<RideResponse>>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         if (driverProfile.ApprovalStatus != DriverApprovalStatus.Approved || !driverProfile.IsAvailable)
         {
             _logger.LogWarning("Ride requests denied: driver {UserId} is not approved and available.", userId);
             return ApiResponse<IEnumerable<RideResponse>>.FailResponse(
-                "You must be an approved and available driver to view ride requests.");
+                "You must be an approved and available driver to view ride requests.", ResponseCodes.Forbidden);
         }
 
         var rides = await _rideRepository.GetAvailableRequestsAsync();
@@ -146,7 +147,7 @@ public class DriverService : IDriverService
         var driverProfile = await _driverRepository.GetByUserIdAsync(userId);
         if (driverProfile is null)
         {
-            return ApiResponse<DriverResponse>.FailResponse("Driver profile not found. Please complete onboarding first.");
+            return ApiResponse<DriverResponse>.FailResponse("Driver profile not found. Please complete onboarding first.", ResponseCodes.NotFound);
         }
 
         return ApiResponse<DriverResponse>.SuccessResponse(MapToResponse(driverProfile));

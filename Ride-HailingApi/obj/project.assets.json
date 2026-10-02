@@ -4368,11 +4368,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\Ride-HailingApi.csproj",
+      "projectUniqueName": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\Ride-HailingApi.csproj",
       "projectName": "Ride-HailingApi",
-      "projectPath": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\Ride-HailingApi.csproj",
+      "projectPath": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\Ride-HailingApi.csproj",
       "packagesPath": "C:\\Users\\USER\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\obj\\",
+      "outputPath": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\USER\\AppData\\Roaming\\NuGet\\NuGet.Config",

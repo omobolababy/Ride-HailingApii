@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Ride_HailingApi.Helpers;
 using RideHailingApi.DTOs.Common;
 
 namespace RideHailingApi.Middleware;
@@ -30,9 +31,9 @@ public class ExceptionHandlingMiddleware
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
             var response = ApiResponse<string>.FailResponse(
-                "An unexpected error occurred. Please try again later.");
+                "An unexpected error occurred. Please try again later.", ResponseCodes.ServerError);
 
-            await context.Response.WriteAsync(JsonSerializer.Serialize(response));
+            await context.Response.WriteAsync(JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         }
     }
 }

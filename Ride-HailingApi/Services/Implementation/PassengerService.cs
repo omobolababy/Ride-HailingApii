@@ -1,5 +1,6 @@
 ﻿using Ride_HailingApi.DTOs.Passenger;
 using Ride_HailingApi.Repositories.Interface;
+using Ride_HailingApi.Helpers;
 using Ride_HailingApi.Services.Interface;
 using RideHailingApi.DTOs.Common;
 
@@ -24,7 +25,7 @@ public class PassengerService : IPassengerService
         if (user is null)
         {
             _logger.LogWarning("Profile request failed: user {UserId} not found.", userId);
-            return ApiResponse<PassengerProfileResponse>.FailResponse("User not found.");
+            return ApiResponse<PassengerProfileResponse>.FailResponse("User not found.", ResponseCodes.NotFound);
         }
 
         return ApiResponse<PassengerProfileResponse>.SuccessResponse(MapToResponse(user));
@@ -36,13 +37,13 @@ public class PassengerService : IPassengerService
         if (user is null)
         {
             _logger.LogWarning("Profile update failed: user {UserId} not found.", userId);
-            return ApiResponse<PassengerProfileResponse>.FailResponse("User not found.");
+            return ApiResponse<PassengerProfileResponse>.FailResponse("User not found.", ResponseCodes.NotFound);
         }
 
         if (user.PhoneNumber != request.PhoneNumber && await _userRepository.PhoneNumberExistsAsync(request.PhoneNumber))
         {
             _logger.LogWarning("Profile update rejected for user {UserId}: phone number already in use.", userId);
-            return ApiResponse<PassengerProfileResponse>.FailResponse("This phone number is already in use.");
+            return ApiResponse<PassengerProfileResponse>.FailResponse("This phone number is already in use.", ResponseCodes.Conflict);
         }
 
         var phoneChanged = user.PhoneNumber != request.PhoneNumber;

@@ -44,19 +44,19 @@ public class AuthService : IAuthService
         if (request.Role == UserRole.Admin)
         {
             _logger.LogWarning("Registration rejected: attempt to self-register an Admin account.");
-            return ApiResponse<string>.FailResponse("Admin accounts cannot be self-registered.");
+            return ApiResponse<string>.FailResponse("Admin accounts cannot be self-registered.", ResponseCodes.BadRequest);
         }
 
         if (await _userRepository.EmailExistsAsync(request.Email))
         {
             _logger.LogWarning("Registration rejected: email address is already registered.");
-            return ApiResponse<string>.FailResponse("An account with this email already exists.");
+            return ApiResponse<string>.FailResponse("An account with this email already exists.", ResponseCodes.Conflict);
         }
 
         if (await _userRepository.PhoneNumberExistsAsync(request.PhoneNumber))
         {
             _logger.LogWarning("Registration rejected: phone number is already registered.");
-            return ApiResponse<string>.FailResponse("An account with this phone number already exists.");
+            return ApiResponse<string>.FailResponse("An account with this phone number already exists.", ResponseCodes.Conflict);
         }
 
         var user = new User
@@ -77,7 +77,7 @@ public class AuthService : IAuthService
         {
             // Two simultaneous registrations can both pass the exists-checks; the unique index then rejects the second.
             _logger.LogWarning(ex, "Registration failed on save, most likely a duplicate email or phone number.");
-            return ApiResponse<string>.FailResponse("An account with this email or phone number already exists.");
+            return ApiResponse<string>.FailResponse("An account with this email or phone number already exists.", ResponseCodes.Conflict);
         }
 
         _logger.LogInformation("User {UserId} registered with role {Role}.", user.Id, user.Role);
@@ -88,7 +88,7 @@ public class AuthService : IAuthService
             "User", user.Id.ToString(), $"New {user.Role} account registered with email {user.Email}");
 
         return ApiResponse<string>.SuccessResponse(
-            "Registration successful. Please check your email for a verification code.");
+            "Registration successful. Please check your email and phone for verification codes.", responseCode: ResponseCodes.Created);
     }
 
     public async Task<ApiResponse<string>> VerifyEmailAsync(VerifyEmailRequest request)
@@ -97,7 +97,7 @@ public class AuthService : IAuthService
         if (user is null)
         {
             _logger.LogWarning("Email verification failed: no matching account.");
-            return ApiResponse<string>.FailResponse("Invalid email or OTP.");
+            return ApiResponse<string>.FailResponse("Invalid email or OTP.", ResponseCodes.BadRequest);
         }
 
         if (user.IsEmailVerified)
@@ -111,7 +111,7 @@ public class AuthService : IAuthService
             _logger.LogWarning("Email verification failed for user {UserId}: invalid or expired OTP.", user.Id);
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "EmailVerification", "User",
                 user.Id.ToString(), "Invalid or expired OTP", wasSuccessful: false);
-            return ApiResponse<string>.FailResponse("Invalid or expired OTP.");
+            return ApiResponse<string>.FailResponse("Invalid or expired OTP.", ResponseCodes.BadRequest);
         }
 
         otp.IsUsed = true;
@@ -132,7 +132,7 @@ public class AuthService : IAuthService
         if (user is null)
         {
             _logger.LogWarning("Phone verification failed: no matching account.");
-            return ApiResponse<string>.FailResponse("Invalid phone number or OTP.");
+            return ApiResponse<string>.FailResponse("Invalid phone number or OTP.", ResponseCodes.BadRequest);
         }
 
         if (user.IsPhoneVerified)
@@ -146,7 +146,7 @@ public class AuthService : IAuthService
             _logger.LogWarning("Phone verification failed for user {UserId}: invalid or expired OTP.", user.Id);
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "PhoneVerification", "User",
                 user.Id.ToString(), "Invalid or expired OTP", wasSuccessful: false);
-            return ApiResponse<string>.FailResponse("Invalid or expired OTP.");
+            return ApiResponse<string>.FailResponse("Invalid or expired OTP.", ResponseCodes.BadRequest);
         }
 
         otp.IsUsed = true;
@@ -192,13 +192,13 @@ public class AuthService : IAuthService
             _logger.LogWarning("Failed login attempt (matched user id: {UserId}).", user?.Id);
             await _auditService.LogAsync(user?.Id, user?.Role.ToString() ?? "Unknown", "LoginAttempt",
                 "User", user?.Id.ToString(), $"Failed login for {request.Email}", wasSuccessful: false);
-            return ApiResponse<LoginResponse>.FailResponse("Invalid email or password.");
+            return ApiResponse<LoginResponse>.FailResponse("Invalid email or password.", ResponseCodes.Unauthorized);
         }
 
         if (!user.IsEmailVerified)
         {
             _logger.LogWarning("Login blocked for user {UserId}: email address not verified.", user.Id);
-            return ApiResponse<LoginResponse>.FailResponse("Please verify your email address before logging in.");
+            return ApiResponse<LoginResponse>.FailResponse("Please verify your email address before logging in.", ResponseCodes.Forbidden);
         }
 
         if (!user.IsActive)
@@ -206,7 +206,7 @@ public class AuthService : IAuthService
             _logger.LogWarning("Login blocked for user {UserId}: account is deactivated.", user.Id);
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "LoginAttempt", "User",
                 user.Id.ToString(), "Login attempt on deactivated account", wasSuccessful: false);
-            return ApiResponse<LoginResponse>.FailResponse("Your account has been deactivated. Please contact support.");
+            return ApiResponse<LoginResponse>.FailResponse("Your account has been deactivated. Please contact support.", ResponseCodes.Forbidden);
         }
 
         var (token, expiresAtUtc) = _tokenService.GenerateToken(user);
@@ -246,6 +246,8 @@ public class AuthService : IAuthService
             await _otpRepository.SaveChangesAsync();
 
             await _emailService.SendPasswordResetOtpAsync(user.Email, user.FullName, code, _otpSettings.ExpiryMinutes);
+            await _smsService.SendSmsAsync(user.Id, user.PhoneNumber,
+                SmsUtils.PasswordResetOtp(code, _otpSettings.ExpiryMinutes));
 
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "PasswordResetRequested", "User", user.Id.ToString());
             _logger.LogInformation("Password reset OTP issued for user {UserId}.", user.Id);
@@ -261,7 +263,7 @@ public class AuthService : IAuthService
         if (user is null)
         {
             _logger.LogWarning("Password reset failed: no matching account.");
-            return ApiResponse<string>.FailResponse("Invalid request.");
+            return ApiResponse<string>.FailResponse("Invalid request.", ResponseCodes.BadRequest);
         }
 
         var otp = await _otpRepository.GetValidPasswordResetOtpAsync(user.Id, request.Otp);
@@ -270,7 +272,7 @@ public class AuthService : IAuthService
             _logger.LogWarning("Password reset failed for user {UserId}: invalid or expired OTP.", user.Id);
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "PasswordReset", "User", user.Id.ToString(),
                 "Invalid or expired OTP", wasSuccessful: false);
-            return ApiResponse<string>.FailResponse("Invalid or expired OTP.");
+            return ApiResponse<string>.FailResponse("Invalid or expired OTP.", ResponseCodes.BadRequest);
         }
 
         otp.IsUsed = true;
@@ -293,7 +295,7 @@ public class AuthService : IAuthService
         if (user is null)
         {
             _logger.LogWarning("Password change failed: user {UserId} not found.", userId);
-            return ApiResponse<string>.FailResponse("User not found.");
+            return ApiResponse<string>.FailResponse("User not found.", ResponseCodes.NotFound);
         }
 
         if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
@@ -301,7 +303,7 @@ public class AuthService : IAuthService
             _logger.LogWarning("Password change failed for user {UserId}: incorrect current password.", user.Id);
             await _auditService.LogAsync(user.Id, user.Role.ToString(), "PasswordChange", "User", user.Id.ToString(),
                 "Incorrect current password", wasSuccessful: false);
-            return ApiResponse<string>.FailResponse("Current password is incorrect.");
+            return ApiResponse<string>.FailResponse("Current password is incorrect.", ResponseCodes.BadRequest);
         }
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);

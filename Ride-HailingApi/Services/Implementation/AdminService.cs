@@ -4,6 +4,7 @@ using Ride_HailingApi.DTOs.Driver;
 using Ride_HailingApi.Entities;
 using Ride_HailingApi.Enums;
 using Ride_HailingApi.Repositories.Interface;
+using Ride_HailingApi.Helpers;
 using Ride_HailingApi.Services.Interface;
 using Ride_HailingApi.Utils;
 using RideHailingApi.DTOs.Common;
@@ -57,13 +58,13 @@ public class AdminService : IAdminService
         if (user is null)
         {
             _logger.LogWarning("Admin {AdminUserId} tried to change status of unknown user {UserId}.", adminUserId, userId);
-            return ApiResponse<string>.FailResponse("User not found.");
+            return ApiResponse<string>.FailResponse("User not found.", ResponseCodes.NotFound);
         }
 
         if (user.Role == UserRole.Admin)
         {
             _logger.LogWarning("Admin {AdminUserId} tried to change status of admin account {UserId}.", adminUserId, userId);
-            return ApiResponse<string>.FailResponse("Admin accounts cannot be deactivated through this endpoint.");
+            return ApiResponse<string>.FailResponse("Admin accounts cannot be deactivated through this endpoint.", ResponseCodes.Forbidden);
         }
 
         user.IsActive = isActive;
@@ -90,13 +91,13 @@ public class AdminService : IAdminService
         if (driverProfile is null)
         {
             _logger.LogWarning("Admin {AdminUserId} tried to approve unknown driver profile {DriverProfileId}.", adminUserId, driverProfileId);
-            return ApiResponse<string>.FailResponse("Driver profile not found.");
+            return ApiResponse<string>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         if (driverProfile.ApprovalStatus == DriverApprovalStatus.Approved)
         {
             _logger.LogWarning("Admin {AdminUserId} tried to approve driver profile {DriverProfileId}, which is already approved.", adminUserId, driverProfileId);
-            return ApiResponse<string>.FailResponse("This driver is already approved.");
+            return ApiResponse<string>.FailResponse("This driver is already approved.", ResponseCodes.Conflict);
         }
 
         driverProfile.ApprovalStatus = DriverApprovalStatus.Approved;
@@ -115,7 +116,7 @@ public class AdminService : IAdminService
         if (driverProfile.User is null)
         {
             _logger.LogError("User data missing for driver profile {DriverProfileId}.", driverProfileId);
-            return ApiResponse<string>.FailResponse("Driver user data not found.");
+            return ApiResponse<string>.FailResponse("Driver user data not found.", ResponseCodes.NotFound);
         }
 
         await _emailService.SendDriverApplicationApprovedAsync(driverProfile.User.Email, driverProfile.User.FullName);
@@ -131,7 +132,7 @@ public class AdminService : IAdminService
         if (driverProfile is null)
         {
             _logger.LogWarning("Admin {AdminUserId} tried to reject unknown driver profile {DriverProfileId}.", adminUserId, driverProfileId);
-            return ApiResponse<string>.FailResponse("Driver profile not found.");
+            return ApiResponse<string>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         driverProfile.ApprovalStatus = DriverApprovalStatus.Rejected;
@@ -148,7 +149,7 @@ public class AdminService : IAdminService
         if (driverProfile.User is null)
         {
             _logger.LogError("User data missing for driver profile {DriverProfileId}.", driverProfileId);
-            return ApiResponse<string>.FailResponse("Driver user data not found.");
+            return ApiResponse<string>.FailResponse("Driver user data not found.", ResponseCodes.NotFound);
         }
 
         await _emailService.SendDriverApplicationRejectedAsync(driverProfile.User.Email, driverProfile.User.FullName, request.Reason);

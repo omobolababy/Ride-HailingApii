@@ -17,7 +17,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Ride> Rides => Set<Ride>();
     public DbSet<RideStatusHistory> RideStatusHistories => Set<RideStatusHistory>();
     public DbSet<Notification> Notifications => Set<Notification>();
-    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<AuditLog> AuditLog => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

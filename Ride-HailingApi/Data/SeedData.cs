@@ -35,7 +35,7 @@ public static class SeedData
         {
             FullName = section["FullName"] ?? "System Admin",
             Email = email,
-            PhoneNumber = section["PhoneNumber"] ?? "+2340000000000",
+            PhoneNumber = section["PhoneNumber"] ?? section["Phone"] ?? "+2340000000000",
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
             Role = UserRole.Admin,
             IsEmailVerified = true,

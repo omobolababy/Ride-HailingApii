@@ -3,6 +3,7 @@ using Ride_HailingApi.DTOs.Ride;
 using Ride_HailingApi.Entities;
 using Ride_HailingApi.Enums;
 using Ride_HailingApi.Repositories.Interface;
+using Ride_HailingApi.Helpers;
 using Ride_HailingApi.Services.Interface;
 using Ride_HailingApi.Utils;
 using RideHailingApi.DTOs.Common;
@@ -57,7 +58,7 @@ public class RideService : IRideService
         if (passenger is null || passenger.Role != UserRole.Passenger)
         {
             _logger.LogWarning("Ride request rejected: user {UserId} is not a passenger account.", passengerId);
-            return ApiResponse<RideResponse>.FailResponse("Only passenger accounts can request rides.");
+            return ApiResponse<RideResponse>.FailResponse("Only passenger accounts can request rides.", ResponseCodes.Forbidden);
         }
 
         var reference = await GenerateUniqueReferenceAsync();
@@ -88,7 +89,7 @@ public class RideService : IRideService
             ride.Id.ToString(), $"Ride {reference} requested from '{request.PickupLocation}' to '{request.Destination}'");
 
         var full = await _rideRepository.GetByIdWithDetailsAsync(ride.Id);
-        return ApiResponse<RideResponse>.SuccessResponse(RideMapper.MapToResponse(full!), "Ride requested successfully.");
+        return ApiResponse<RideResponse>.SuccessResponse(RideMapper.MapToResponse(full!), "Ride requested successfully.", ResponseCodes.Created);
     }
 
     public async Task<ApiResponse<IEnumerable<RideResponse>>> GetMyRidesAsync(int passengerId)
@@ -102,13 +103,13 @@ public class RideService : IRideService
         var ride = await _rideRepository.GetByIdWithDetailsAsync(rideId);
         if (ride is null)
         {
-            return ApiResponse<RideResponse>.FailResponse("Ride not found.");
+            return ApiResponse<RideResponse>.FailResponse("Ride not found.", ResponseCodes.NotFound);
         }
 
         if (requestingUserRole == UserRole.Passenger && ride.PassengerId != requestingUserId)
         {
             _logger.LogWarning("Access denied: passenger {UserId} tried to view ride {RideId} owned by another passenger.", requestingUserId, rideId);
-            return ApiResponse<RideResponse>.FailResponse("You do not have permission to view this ride.");
+            return ApiResponse<RideResponse>.FailResponse("You do not have permission to view this ride.", ResponseCodes.Forbidden);
         }
 
         if (requestingUserRole == UserRole.Driver)
@@ -117,7 +118,7 @@ public class RideService : IRideService
             if (driverProfile is null || ride.DriverProfileId != driverProfile.Id)
             {
                 _logger.LogWarning("Access denied: driver {UserId} tried to view ride {RideId} not assigned to them.", requestingUserId, rideId);
-                return ApiResponse<RideResponse>.FailResponse("You do not have permission to view this ride.");
+                return ApiResponse<RideResponse>.FailResponse("You do not have permission to view this ride.", ResponseCodes.Forbidden);
             }
         }
 
@@ -129,19 +130,19 @@ public class RideService : IRideService
         var ride = await _rideRepository.GetByIdWithDetailsAsync(rideId);
         if (ride is null)
         {
-            return ApiResponse<string>.FailResponse("Ride not found.");
+            return ApiResponse<string>.FailResponse("Ride not found.", ResponseCodes.NotFound);
         }
 
         if (ride.PassengerId != passengerId)
         {
             _logger.LogWarning("Access denied: passenger {UserId} tried to cancel ride {RideId} owned by another passenger.", passengerId, rideId);
-            return ApiResponse<string>.FailResponse("You do not have permission to cancel this ride.");
+            return ApiResponse<string>.FailResponse("You do not have permission to cancel this ride.", ResponseCodes.Forbidden);
         }
 
         if (!PassengerCancellableStatuses.Contains(ride.Status))
         {
             _logger.LogWarning("Cancel rejected for ride {RideReference}: status {Status} is not cancellable.", ride.RideReference, ride.Status);
-            return ApiResponse<string>.FailResponse($"A ride in '{ride.Status}' status can no longer be cancelled.");
+            return ApiResponse<string>.FailResponse($"A ride in '{ride.Status}' status can no longer be cancelled.", ResponseCodes.Conflict);
         }
 
         var previousStatus = ride.Status;
@@ -160,7 +161,7 @@ public class RideService : IRideService
         _rideRepository.Update(ride);
         if (!await TrySaveRideAsync(ride, "cancel"))
         {
-            return ApiResponse<string>.FailResponse(ConcurrencyMessage);
+            return ApiResponse<string>.FailResponse(ConcurrencyMessage, ResponseCodes.Conflict);
         }
 
         _logger.LogInformation("Ride {RideReference} cancelled by passenger {PassengerId} (was {PreviousStatus}).", ride.RideReference, passengerId, previousStatus);
@@ -178,25 +179,25 @@ public class RideService : IRideService
         var driverProfile = await _driverRepository.GetByUserIdAsync(driverUserId);
         if (driverProfile is null)
         {
-            return ApiResponse<RideResponse>.FailResponse("Driver profile not found.");
+            return ApiResponse<RideResponse>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         if (driverProfile.ApprovalStatus != DriverApprovalStatus.Approved || !driverProfile.IsAvailable)
         {
             _logger.LogWarning("Accept rejected: driver {UserId} is not approved and available.", driverUserId);
-            return ApiResponse<RideResponse>.FailResponse("You must be an approved and available driver to accept rides.");
+            return ApiResponse<RideResponse>.FailResponse("You must be an approved and available driver to accept rides.", ResponseCodes.Forbidden);
         }
 
         var ride = await _rideRepository.GetByIdWithDetailsAsync(rideId);
         if (ride is null)
         {
-            return ApiResponse<RideResponse>.FailResponse("Ride not found.");
+            return ApiResponse<RideResponse>.FailResponse("Ride not found.", ResponseCodes.NotFound);
         }
 
         if (ride.Status != RideStatus.Requested || ride.DriverProfileId != null)
         {
             _logger.LogWarning("Accept rejected for ride {RideReference}: no longer available (status {Status}).", ride.RideReference, ride.Status);
-            return ApiResponse<RideResponse>.FailResponse("This ride is no longer available for acceptance.");
+            return ApiResponse<RideResponse>.FailResponse("This ride is no longer available for acceptance.", ResponseCodes.Conflict);
         }
 
         ride.DriverProfileId = driverProfile.Id;
@@ -214,7 +215,7 @@ public class RideService : IRideService
         if (!await TrySaveRideAsync(ride, "accept"))
         {
             // Another driver accepted (or the passenger cancelled) between our read and our save.
-            return ApiResponse<RideResponse>.FailResponse("This ride is no longer available for acceptance.");
+            return ApiResponse<RideResponse>.FailResponse("This ride is no longer available for acceptance.", ResponseCodes.Conflict);
         }
 
         _logger.LogInformation("Ride {RideReference} accepted by driver {DriverProfileId}.", ride.RideReference, driverProfile.Id);
@@ -245,26 +246,26 @@ public class RideService : IRideService
         var driverProfile = await _driverRepository.GetByUserIdAsync(driverUserId);
         if (driverProfile is null)
         {
-            return ApiResponse<RideResponse>.FailResponse("Driver profile not found.");
+            return ApiResponse<RideResponse>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         var ride = await _rideRepository.GetByIdWithDetailsAsync(rideId);
         if (ride is null)
         {
-            return ApiResponse<RideResponse>.FailResponse("Ride not found.");
+            return ApiResponse<RideResponse>.FailResponse("Ride not found.", ResponseCodes.NotFound);
         }
 
         if (ride.DriverProfileId != driverProfile.Id)
         {
             _logger.LogWarning("Access denied: driver {UserId} tried to update ride {RideId} assigned to another driver.", driverUserId, rideId);
-            return ApiResponse<RideResponse>.FailResponse("You are not assigned to this ride.");
+            return ApiResponse<RideResponse>.FailResponse("You are not assigned to this ride.", ResponseCodes.Forbidden);
         }
 
         if (!DriverTransitions.TryGetValue(ride.Status, out var allowedNext) || !allowedNext.Contains(request.NewStatus))
         {
             _logger.LogWarning("Invalid transition for ride {RideReference}: {From} -> {To} (driver {UserId}).", ride.RideReference, ride.Status, request.NewStatus, driverUserId);
             return ApiResponse<RideResponse>.FailResponse(
-                $"Cannot move a ride from '{ride.Status}' to '{request.NewStatus}'.");
+                $"Cannot move a ride from '{ride.Status}' to '{request.NewStatus}'.", ResponseCodes.Conflict);
         }
 
         var previousStatus = ride.Status;
@@ -293,7 +294,7 @@ public class RideService : IRideService
         _rideRepository.Update(ride);
         if (!await TrySaveRideAsync(ride, "update status of"))
         {
-            return ApiResponse<RideResponse>.FailResponse(ConcurrencyMessage);
+            return ApiResponse<RideResponse>.FailResponse(ConcurrencyMessage, ResponseCodes.Conflict);
         }
 
         _logger.LogInformation("Ride {RideReference} moved {From} -> {To} by driver {UserId}.", ride.RideReference, previousStatus, request.NewStatus, driverUserId);
@@ -328,7 +329,7 @@ public class RideService : IRideService
         var driverProfile = await _driverRepository.GetByUserIdAsync(driverUserId);
         if (driverProfile is null)
         {
-            return ApiResponse<IEnumerable<RideResponse>>.FailResponse("Driver profile not found.");
+            return ApiResponse<IEnumerable<RideResponse>>.FailResponse("Driver profile not found.", ResponseCodes.NotFound);
         }
 
         var rides = await _rideRepository.GetByDriverProfileIdAsync(driverProfile.Id);
@@ -343,10 +344,10 @@ public class RideService : IRideService
 
     // ---------- Private helpers ----------
 
-    /// <summary>
+    
     /// Saves a ride change. Returns false if another request changed the same ride first
     /// (optimistic concurrency via the RowVersion column), so callers can respond cleanly.
-    /// </summary>
+   
     private async Task<bool> TrySaveRideAsync(Ride ride, string operation)
     {
         try

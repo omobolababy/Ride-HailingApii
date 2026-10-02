@@ -12,7 +12,7 @@ using RideHailingApi.Data;
 namespace Ride_HailingApi.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260930094832_Initial")]
+    [Migration("20261002110005_Initial")]
     partial class Initial
     {
         /// <inheritdoc />

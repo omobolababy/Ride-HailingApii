@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "Zb0togALKLE=",
+  "dgSpecHash": "WI9wzakoN04=",
   "success": true,
-  "projectFilePath": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\Ride-HailingApi.csproj",
+  "projectFilePath": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\Ride-HailingApi.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\USER\\.nuget\\packages\\azure.core\\1.41.0\\azure.core.1.41.0.nupkg.sha512",
     "C:\\Users\\USER\\.nuget\\packages\\azure.identity\\1.12.1\\azure.identity.1.12.1.nupkg.sha512",
@@ -94,9 +94,9 @@
       "code": "NU1701",
       "level": "Warning",
       "message": "Package 'BCrypt 1.0.0' was restored using '.NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1' instead of the project target framework 'net8.0'. This package may not be fully compatible with your project.",
-      "projectPath": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\Ride-HailingApi.csproj",
+      "projectPath": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\Ride-HailingApi.csproj",
       "warningLevel": 1,
-      "filePath": "C:\\Users\\USER\\RiderProjects\\Ride-HailingApi\\Ride-HailingApi\\Ride-HailingApi.csproj",
+      "filePath": "C:\\Users\\USER\\Downloads\\Ride-HailingApi-MinimalApi - Copy\\Ride-HailingApi\\Ride-HailingApi.csproj",
       "libraryId": "BCrypt",
       "targetGraphs": [
         "net8.0"

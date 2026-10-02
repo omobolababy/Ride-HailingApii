@@ -1,5 +1,5 @@
-﻿using System.Linq;
 using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using MimeKit.Text;
@@ -13,326 +13,112 @@ public class EmailService : IEmailService
 {
     private readonly SmtpMail _smtpMail;
     private readonly ILogger<EmailService> _logger;
+    private readonly IHostEnvironment _environment;
 
     public EmailService(
         IOptions<SmtpMail> smtpMail,
-        ILogger<EmailService> logger)
+        ILogger<EmailService> logger,
+        IHostEnvironment environment)
     {
         _smtpMail = smtpMail.Value;
         _logger = logger;
+        _environment = environment;
     }
+
+    // ---------- Transport ----------
 
     private async Task SendMimeMessageAsync(MimeMessage message)
     {
-        _logger.LogInformation(
-            "Sending email to {Recipient} - Subject: {Subject}",
-            message.To,
-            message.Subject);
+        _logger.LogInformation("Sending email to {Recipient} - Subject: {Subject}", message.To, message.Subject);
 
         using var client = new SmtpClient();
 
         try
         {
-            _logger.LogInformation(
-                "Connecting to SMTP server {Server}:{Port}",
-                _smtpMail.Server,
-                _smtpMail.Port);
-
-            // Use STARTTLS for port 587
-            await client.ConnectAsync(
-                _smtpMail.Server,
-                _smtpMail.Port,
-                MailKit.Security.SecureSocketOptions.StartTls);
-
-            _logger.LogInformation("Connected to SMTP server");
-
-            await client.AuthenticateAsync(
-                _smtpMail.Username,
-                _smtpMail.Password);
-
-            _logger.LogInformation("Authenticated with SMTP server");
-
+            // STARTTLS on port 587
+            await client.ConnectAsync(_smtpMail.Server, _smtpMail.Port, SecureSocketOptions.StartTls);
+            await client.AuthenticateAsync(_smtpMail.Username, _smtpMail.Password);
             await client.SendAsync(message);
+            await client.DisconnectAsync(true);
 
-            _logger.LogInformation(
-                "Email sent successfully to {Recipient}",
+            _logger.LogInformation("Email sent successfully to {Recipient}", message.To);
+        }
+        catch (Exception ex) when (ex is AuthenticationException
+                                       or SmtpCommandException
+                                       or SmtpProtocolException)
+        {
+            // The account was already created, so a failed send must not fail the whole request;
+            // the user can use the resend-OTP endpoints. Check the SMTP credentials in appsettings.
+            _logger.LogError(ex,
+                "SMTP error while sending email to {Recipient}. The email was NOT sent. Check the SMTP credentials.",
                 message.To);
 
-            await client.DisconnectAsync(true);
+            // Development convenience only: surface the email body (which contains the OTP) in the console.
+            // Never do this outside Development, since logs would then hold live verification codes.
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogWarning("EMAIL CONTENT FALLBACK (DEV ONLY)\nSubject: {Subject}\nBody: {Body}",
+                    message.Subject, GetBodyText(message));
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "Error occurred while sending email to {Recipient}. Fallback: Check logs for content if in development.",
-                message.To);
-
-            // In development, we might want to allow the process to continue even if email fails
-            // But since this is a service, we should probably let the caller handle it or 
-            // wrap it. For now, I'll keep the throw but add more context.
-            // Actually, to fix the user's immediate "can't create" problem, 
-            // I'll make it not throw if it's an authentication error or SMTP disconnection, 
-            // and just log the email body to console.
-            
-            if (ex is MailKit.Security.AuthenticationException || 
-                ex is MailKit.Net.Smtp.SmtpCommandException || 
-                ex is MailKit.Net.Smtp.SmtpProtocolException)
-            {
-                _logger.LogWarning("SMTP error (Auth/Command/Protocol) occurred. The email was not sent, but the process will continue. Please check your credentials in appsettings.json.");
-                
-                string bodyText = "";
-                if (message.Body is TextPart textPart)
-                {
-                    bodyText = textPart.Text;
-                }
-                else if (message.Body is Multipart multipart)
-                {
-                    var html = multipart.OfType<TextPart>().FirstOrDefault(x => x.IsHtml);
-                    var plain = multipart.OfType<TextPart>().FirstOrDefault(x => x.IsPlain);
-                    bodyText = html?.Text ?? plain?.Text ?? "Complex multipart body";
-                }
-
-                _logger.LogWarning("EMAIL CONTENT FALLBACK (OTP LOGGING):\nSubject: {Subject}\nBody: {Body}", message.Subject, bodyText);
-                return; 
-            }
-
+            _logger.LogError(ex, "Unexpected error while sending email to {Recipient}", message.To);
             throw;
         }
     }
 
-    private MimeMessage CreateBaseMessage(string toEmail, string subject)
+    private static string GetBodyText(MimeMessage message) => message.Body switch
+    {
+        TextPart text => text.Text,
+        Multipart multipart =>
+            multipart.OfType<TextPart>().FirstOrDefault(x => x.IsHtml)?.Text
+            ?? multipart.OfType<TextPart>().FirstOrDefault(x => x.IsPlain)?.Text
+            ?? "Complex multipart body",
+        _ => string.Empty
+    };
+
+    private MimeMessage CreateBaseMessage(string toEmail, string toName, string subject, string htmlBody)
     {
         var message = new MimeMessage();
-
-        message.From.Add(
-            new MailboxAddress(
-                _smtpMail.SenderName,
-                _smtpMail.SenderEmail));
-
-        message.To.Add(
-            new MailboxAddress(
-                toEmail,
-                toEmail));
-
+        message.From.Add(new MailboxAddress(_smtpMail.SenderName, _smtpMail.SenderEmail));
+        message.To.Add(new MailboxAddress(string.IsNullOrWhiteSpace(toName) ? toEmail : toName, toEmail));
         message.Subject = subject;
-
+        message.Body = new TextPart(TextFormat.Html) { Text = htmlBody };
         return message;
     }
 
-    public async Task SendEmailVerificationOtpAsync(
-        string toEmail,
-        string fullName,
-        string otp,
-        int expiryMinutes)
-    {
-        var email = EmailUtils.EmailVerificationOtp(
-            fullName,
-            otp,
-            expiryMinutes);
+    private Task SendAsync(string toEmail, string toName, (string Subject, string Body) email) =>
+        SendMimeMessageAsync(CreateBaseMessage(toEmail, toName, email.Subject, email.Body));
 
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
+    // ---------- IEmailService ----------
 
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
+    public Task SendEmailVerificationOtpAsync(string toEmail, string fullName, string otp, int expiryMinutes) =>
+        SendAsync(toEmail, fullName, EmailUtils.EmailVerificationOtp(fullName, otp, expiryMinutes));
 
-        await SendMimeMessageAsync(message);
-    }
+    public Task SendPasswordResetOtpAsync(string toEmail, string fullName, string otp, int expiryMinutes) =>
+        SendAsync(toEmail, fullName, EmailUtils.PasswordResetOtp(fullName, otp, expiryMinutes));
 
-    public async Task SendPasswordResetOtpAsync(
-        string toEmail,
-        string fullName,
-        string otp,
-        int expiryMinutes)
-    {
-        var email = EmailUtils.PasswordResetOtp(
-            fullName,
-            otp,
-            expiryMinutes);
+    public Task SendPasswordChangedNoticeAsync(string toEmail, string fullName) =>
+        SendAsync(toEmail, fullName, EmailUtils.PasswordChangedNotice(fullName));
 
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
+    public Task SendDriverApplicationApprovedAsync(string toEmail, string fullName) =>
+        SendAsync(toEmail, fullName, EmailUtils.DriverApplicationApproved(fullName));
 
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
+    public Task SendDriverApplicationRejectedAsync(string toEmail, string fullName, string reason) =>
+        SendAsync(toEmail, fullName, EmailUtils.DriverApplicationRejected(fullName, reason));
 
-        await SendMimeMessageAsync(message);
-    }
+    public Task SendRideAcceptedByDriverAsync(string toEmail, string passengerName, string driverName,
+        string vehicleInfo, string plateNumber, string rideReference) =>
+        SendAsync(toEmail, passengerName,
+            EmailUtils.RideAcceptedByDriver(passengerName, driverName, vehicleInfo, plateNumber, rideReference));
 
-    public async Task SendPasswordChangedNoticeAsync(
-        string toEmail,
-        string fullName)
-    {
-        var email = EmailUtils.PasswordChangedNotice(fullName);
+    public Task SendDriverArrivedAsync(string toEmail, string passengerName, string rideReference) =>
+        SendAsync(toEmail, passengerName, EmailUtils.DriverArrived(passengerName, rideReference));
 
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
+    public Task SendRideCancelledAsync(string toEmail, string recipientName, string rideReference, string reason) =>
+        SendAsync(toEmail, recipientName, EmailUtils.RideCancelled(recipientName, rideReference, reason));
 
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendDriverApplicationApprovedAsync(
-        string toEmail,
-        string fullName)
-    {
-        var email = EmailUtils.DriverApplicationApproved(fullName);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendDriverApplicationRejectedAsync(
-        string toEmail,
-        string fullName,
-        string reason)
-    {
-        var email = EmailUtils.DriverApplicationRejected(
-            fullName,
-            reason);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendRideAcceptedByDriverAsync(
-        string toEmail,
-        string passengerName,
-        string driverName,
-        string vehicleInfo,
-        string plateNumber,
-        string rideReference)
-    {
-        var email = EmailUtils.RideAcceptedByDriver(
-            passengerName,
-            driverName,
-            vehicleInfo,
-            plateNumber,
-            rideReference);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendDriverArrivedAsync(
-        string toEmail,
-        string passengerName,
-        string rideReference)
-    {
-        var email = EmailUtils.DriverArrived(
-            passengerName,
-            rideReference);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendRideCancelledAsync(
-        string toEmail,
-        string recipientName,
-        string rideReference,
-        string reason)
-    {
-        var email = EmailUtils.RideCancelled(
-            recipientName,
-            rideReference,
-            reason);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task SendRideCompletedAsync(
-        string toEmail,
-        string passengerName,
-        string rideReference,
-        decimal? fare)
-    {
-        var email = EmailUtils.RideCompleted(
-            passengerName,
-            rideReference,
-            fare);
-
-        var message = CreateBaseMessage(
-            toEmail,
-            email.Subject);
-
-        message.Body = new TextPart(TextFormat.Html)
-        {
-            Text = email.Body
-        };
-
-        await SendMimeMessageAsync(message);
-    }
-
-    public async Task<bool> SendEmailAsync(int userId, string toEmail, string subject, string htmlBody)
-    {
-        try
-        {
-            var message = CreateBaseMessage(toEmail, subject);
-            message.Body = new TextPart(TextFormat.Html)
-            {
-                Text = htmlBody
-            };
-
-            await SendMimeMessageAsync(message);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send email to user {UserId} at {Email}", userId, toEmail);
-            return false;
-        }
-    }
+    public Task SendRideCompletedAsync(string toEmail, string passengerName, string rideReference, decimal? fare) =>
+        SendAsync(toEmail, passengerName, EmailUtils.RideCompleted(passengerName, rideReference, fare));
 }
